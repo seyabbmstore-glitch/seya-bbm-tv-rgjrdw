@@ -1,15 +1,15 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Button,
   Modal,
   Animated,
   TouchableWithoutFeedback,
-  Dimensions
+  Dimensions,
+  PanResponder,
 } from 'react-native';
-import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { colors } from '../styles/commonStyles';
 
 interface SimpleBottomSheetProps {
@@ -33,16 +33,12 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
   onClose
 }) => {
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  const gestureTranslateY = useRef(new Animated.Value(0)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const [currentSnapPoint, setCurrentSnapPoint] = useState(SNAP_POINTS.HALF);
-  const lastGestureY = useRef(0);
-  const startPositionY = useRef(0);
 
   useEffect(() => {
     if (isVisible) {
       setCurrentSnapPoint(SNAP_POINTS.HALF);
-      gestureTranslateY.setValue(0);
       Animated.parallel([
         Animated.timing(translateY, {
           toValue: SCREEN_HEIGHT - SNAP_POINTS.HALF,
@@ -57,7 +53,6 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
       ]).start();
     } else {
       setCurrentSnapPoint(SNAP_POINTS.CLOSED);
-      gestureTranslateY.setValue(0);
       Animated.parallel([
         Animated.timing(translateY, {
           toValue: SCREEN_HEIGHT,
@@ -79,7 +74,6 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
 
   const snapToPoint = (point: number) => {
     setCurrentSnapPoint(point);
-    gestureTranslateY.setValue(0);
     Animated.timing(translateY, {
       toValue: SCREEN_HEIGHT - point,
       duration: 300,
@@ -87,68 +81,56 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
     }).start();
   };
 
-  // Determines the closest snap point based on velocity and position
-  const getClosestSnapPoint = (currentY: number, velocityY: number) => {
-    const currentPosition = SCREEN_HEIGHT - currentY;
-
-    if (velocityY > 1000) return SNAP_POINTS.CLOSED;
-    if (velocityY < -1000) return SNAP_POINTS.FULL;
-
-    const distances = [
-      { point: SNAP_POINTS.HALF, distance: Math.abs(currentPosition - SNAP_POINTS.HALF) },
-      { point: SNAP_POINTS.FULL, distance: Math.abs(currentPosition - SNAP_POINTS.FULL) },
-    ];
-
-    if (currentPosition < SNAP_POINTS.HALF * 0.5) {
-      return SNAP_POINTS.CLOSED;
-    }
-
-    distances.sort((a, b) => a.distance - b.distance);
-    return distances[0].point;
-  };
-
-  // Handles pan gesture events with boundary clamping
-  const onGestureEvent = (event: any) => {
-    const { translationY } = event.nativeEvent;
-    lastGestureY.current = translationY;
-
-    const currentBasePosition = SCREEN_HEIGHT - currentSnapPoint;
-    const intendedPosition = currentBasePosition + translationY;
-
-    const minPosition = SCREEN_HEIGHT - SNAP_POINTS.FULL;
-    const maxPosition = SCREEN_HEIGHT;
-
-    const clampedPosition = Math.max(minPosition, Math.min(maxPosition, intendedPosition));
-    const clampedTranslation = clampedPosition - currentBasePosition;
-
-    gestureTranslateY.setValue(clampedTranslation);
-  };
-
-  // Handles gesture state changes (begin/end) for snapping behavior
-  const onHandlerStateChange = (event: any) => {
-    const { state, translationY, velocityY } = event.nativeEvent;
-
-    if (state === State.BEGAN) {
-      startPositionY.current = SCREEN_HEIGHT - currentSnapPoint;
-    } else if (state === State.END) {
-      const currentBasePosition = SCREEN_HEIGHT - currentSnapPoint;
-      const intendedPosition = currentBasePosition + translationY;
-
-      const minPosition = SCREEN_HEIGHT - SNAP_POINTS.FULL;
-      const maxPosition = SCREEN_HEIGHT;
-
-      const finalY = Math.max(minPosition, Math.min(maxPosition, intendedPosition));
-      const targetSnapPoint = getClosestSnapPoint(finalY, velocityY);
-
-      gestureTranslateY.setValue(0);
-
-      if (targetSnapPoint === SNAP_POINTS.CLOSED) {
-        onClose?.();
-      } else {
+  // Create pan responder for gesture handling
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        return Math.abs(gestureState.dy) > 10;
+      },
+      onPanResponderGrant: () => {
+        // Start gesture
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const currentBasePosition = SCREEN_HEIGHT - currentSnapPoint;
+        const intendedPosition = currentBasePosition + gestureState.dy;
+        
+        const minPosition = SCREEN_HEIGHT - SNAP_POINTS.FULL;
+        const maxPosition = SCREEN_HEIGHT;
+        
+        const clampedPosition = Math.max(minPosition, Math.min(maxPosition, intendedPosition));
+        translateY.setValue(clampedPosition);
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        const currentBasePosition = SCREEN_HEIGHT - currentSnapPoint;
+        const intendedPosition = currentBasePosition + gestureState.dy;
+        
+        // Determine target snap point based on velocity and position
+        let targetSnapPoint = SNAP_POINTS.HALF;
+        
+        if (gestureState.vy > 1) {
+          // Fast downward swipe - close
+          onClose?.();
+          return;
+        } else if (gestureState.vy < -1) {
+          // Fast upward swipe - full
+          targetSnapPoint = SNAP_POINTS.FULL;
+        } else {
+          // Slow movement - snap to nearest
+          const currentPosition = SCREEN_HEIGHT - intendedPosition;
+          if (currentPosition < SNAP_POINTS.HALF * 0.7) {
+            onClose?.();
+            return;
+          } else if (currentPosition > SNAP_POINTS.HALF * 1.3) {
+            targetSnapPoint = SNAP_POINTS.FULL;
+          } else {
+            targetSnapPoint = SNAP_POINTS.HALF;
+          }
+        }
+        
         snapToPoint(targetSnapPoint);
-      }
-    }
-  };
+      },
+    })
+  ).current;
 
   return (
     <Modal
@@ -167,39 +149,21 @@ const SimpleBottomSheet: React.FC<SimpleBottomSheetProps> = ({
           />
         </TouchableWithoutFeedback>
 
-        <PanGestureHandler
-          onGestureEvent={onGestureEvent}
-          onHandlerStateChange={onHandlerStateChange}
+        <Animated.View
+          style={[
+            styles.bottomSheet,
+            {
+              transform: [{ translateY }],
+            },
+          ]}
+          {...panResponder.panHandlers}
         >
-          <Animated.View
-            style={[
-              styles.bottomSheet,
-              {
-                transform: [
-                  { translateY: Animated.add(translateY, gestureTranslateY) }
-                ],
-              },
-            ]}
-          >
-            <View style={styles.handle} />
+          <View style={styles.handle} />
 
-            <View style={styles.contentContainer}>
-              {children || (
-                <View style={styles.defaultContent}>
-                  <Text style={styles.title}>Bottom Sheet 🎉</Text>
-                  <Text style={styles.description}>
-                    This is a custom bottom sheet implementation.
-                    Try dragging it up and down!
-                  </Text>
-                  <Button
-                    title="Close"
-                    onPress={onClose}
-                  />
-                </View>
-              )}
-            </View>
-          </Animated.View>
-        </PanGestureHandler>
+          <View style={styles.contentContainer}>
+            {children}
+          </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -242,23 +206,6 @@ const styles = StyleSheet.create({
   contentContainer: {
     flex: 1,
     padding: 16,
-  },
-  defaultContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: 16,
-  },
-  description: {
-    fontSize: 16,
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 20,
   },
 });
 

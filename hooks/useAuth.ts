@@ -1,11 +1,7 @@
 
 import { useState, useEffect } from 'react';
-import * as SecureStore from 'expo-secure-store';
-import * as Crypto from 'expo-crypto';
+import { supabase } from '../app/integrations/supabase/client';
 import { User } from '../types';
-
-const USER_KEY = 'user_data';
-const AUTH_TOKEN_KEY = 'auth_token';
 
 export const useAuth = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -13,61 +9,74 @@ export const useAuth = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    loadUser();
-  }, []);
-
-  const loadUser = async () => {
-    try {
-      const userData = await SecureStore.getItemAsync(USER_KEY);
-      const authToken = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
-      
-      if (userData && authToken) {
-        const parsedUser = JSON.parse(userData);
-        setUser(parsedUser);
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const userData: User = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+          isEmailVerified: session.user.email_confirmed_at !== null,
+          createdAt: new Date(session.user.created_at),
+        };
+        setUser(userData);
         setIsAuthenticated(true);
       }
-    } catch (error) {
-      console.log('Error loading user:', error);
-    } finally {
       setIsLoading(false);
-    }
-  };
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const userData: User = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+          isEmailVerified: session.user.email_confirmed_at !== null,
+          createdAt: new Date(session.user.created_at),
+        };
+        setUser(userData);
+        setIsAuthenticated(true);
+      } else {
+        setUser(null);
+        setIsAuthenticated(false);
+      }
+      setIsLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const register = async (email: string, name: string, password: string) => {
     try {
       setIsLoading(true);
       
-      // Simulate registration process
-      const userId = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        email + Date.now().toString()
-      );
-
-      const newUser: User = {
-        id: userId,
+      const { data, error } = await supabase.auth.signUp({
         email,
-        name,
-        isEmailVerified: false,
-        createdAt: new Date(),
-      };
+        password,
+        options: {
+          emailRedirectTo: 'https://natively.dev/email-confirmed',
+          data: {
+            name: name,
+          }
+        }
+      });
 
-      // Generate auth token
-      const authToken = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        userId + Date.now().toString()
-      );
+      if (error) {
+        console.log('Registration error:', error);
+        return { success: false, error: error.message };
+      }
 
-      await SecureStore.setItemAsync(USER_KEY, JSON.stringify(newUser));
-      await SecureStore.setItemAsync(AUTH_TOKEN_KEY, authToken);
-
-      setUser(newUser);
-      setIsAuthenticated(true);
-
-      // Send verification email (simulated)
-      await sendVerificationEmail(email);
+      if (data.user && !data.session) {
+        // User needs to verify email
+        return { 
+          success: true, 
+          message: 'Please check your email and click the verification link to complete registration.' 
+        };
+      }
 
       return { success: true };
-    } catch (error) {
+    } catch (error: any) {
       console.log('Registration error:', error);
       return { success: false, error: 'Registration failed' };
     } finally {
@@ -79,33 +88,18 @@ export const useAuth = () => {
     try {
       setIsLoading(true);
       
-      // Simulate login process
-      const userId = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        email + 'existing_user'
-      );
-
-      const existingUser: User = {
-        id: userId,
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
-        name: email.split('@')[0],
-        isEmailVerified: true,
-        createdAt: new Date(),
-      };
+        password,
+      });
 
-      const authToken = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        userId + Date.now().toString()
-      );
-
-      await SecureStore.setItemAsync(USER_KEY, JSON.stringify(existingUser));
-      await SecureStore.setItemAsync(AUTH_TOKEN_KEY, authToken);
-
-      setUser(existingUser);
-      setIsAuthenticated(true);
+      if (error) {
+        console.log('Login error:', error);
+        return { success: false, error: error.message };
+      }
 
       return { success: true };
-    } catch (error) {
+    } catch (error: any) {
       console.log('Login error:', error);
       return { success: false, error: 'Login failed' };
     } finally {
@@ -115,30 +109,46 @@ export const useAuth = () => {
 
   const logout = async () => {
     try {
-      await SecureStore.deleteItemAsync(USER_KEY);
-      await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
-      setUser(null);
-      setIsAuthenticated(false);
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.log('Logout error:', error);
+      }
     } catch (error) {
       console.log('Logout error:', error);
     }
   };
 
   const sendVerificationEmail = async (email: string) => {
-    // Simulate sending verification email
-    console.log(`Verification email sent to ${email}`);
-    return { success: true };
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: email,
+        options: {
+          emailRedirectTo: 'https://natively.dev/email-confirmed'
+        }
+      });
+
+      if (error) {
+        console.log('Send verification error:', error);
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (error: any) {
+      console.log('Send verification error:', error);
+      return { success: false, error: 'Failed to send verification email' };
+    }
   };
 
   const verifyEmail = async (verificationCode: string) => {
+    // Note: Supabase handles email verification via email links, not codes
+    // This is kept for demo purposes but in real implementation, 
+    // email verification happens automatically when user clicks the email link
     try {
-      if (user && verificationCode === '123456') { // Simulated verification
-        const updatedUser = { ...user, isEmailVerified: true };
-        await SecureStore.setItemAsync(USER_KEY, JSON.stringify(updatedUser));
-        setUser(updatedUser);
+      if (verificationCode === '123456') { // Demo code
         return { success: true };
       }
-      return { success: false, error: 'Invalid verification code' };
+      return { success: false, error: 'Invalid verification code. In production, email verification is handled via email links.' };
     } catch (error) {
       console.log('Email verification error:', error);
       return { success: false, error: 'Verification failed' };

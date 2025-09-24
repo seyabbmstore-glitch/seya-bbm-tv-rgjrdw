@@ -17,10 +17,15 @@ import SpeedIndicator from '../../components/SpeedIndicator';
 import SimpleBottomSheet from '../../components/BottomSheet';
 
 export default function ProfileScreen() {
-  const { user, isAuthenticated, logout, verifyEmail } = useAuth();
+  const { user, isAuthenticated, logout, verifyEmail, login, register } = useAuth();
   const { networkSpeed } = useNetworkSpeed();
   const [showVerification, setShowVerification] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
 
   const handleUpload = () => {
     if (!isAuthenticated) {
@@ -54,6 +59,42 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleAuth = async () => {
+    if (!email.trim() || !password.trim()) {
+      Alert.alert('Error', 'Please fill in all fields.');
+      return;
+    }
+
+    if (!isLoginMode && !name.trim()) {
+      Alert.alert('Error', 'Please enter your name.');
+      return;
+    }
+
+    try {
+      let result;
+      if (isLoginMode) {
+        result = await login(email, password);
+      } else {
+        result = await register(email, name, password);
+      }
+
+      if (result.success) {
+        Alert.alert(
+          'Success', 
+          result.message || (isLoginMode ? 'Logged in successfully!' : 'Registration successful!')
+        );
+        setShowAuth(false);
+        setEmail('');
+        setPassword('');
+        setName('');
+      } else {
+        Alert.alert('Error', result.error || 'Authentication failed');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'An unexpected error occurred');
+    }
+  };
+
   const handleLogout = () => {
     Alert.alert(
       'Logout',
@@ -79,11 +120,72 @@ export default function ProfileScreen() {
         <Text style={[commonStyles.textSecondary, { textAlign: 'center', marginTop: 8, marginBottom: 32 }]}>
           Please log in to access your profile and features.
         </Text>
-        <TouchableOpacity style={[buttonStyles.primary, { width: '80%' }]}>
+        <TouchableOpacity 
+          style={[buttonStyles.primary, { width: '80%' }]}
+          onPress={() => setShowAuth(true)}
+        >
           <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
             Login / Register
           </Text>
         </TouchableOpacity>
+
+        {/* Auth Bottom Sheet */}
+        <SimpleBottomSheet
+          isVisible={showAuth}
+          onClose={() => setShowAuth(false)}
+        >
+          <View style={{ padding: 20 }}>
+            <Text style={[commonStyles.subtitle, { marginBottom: 16 }]}>
+              {isLoginMode ? 'Login' : 'Register'}
+            </Text>
+            
+            <TextInput
+              style={commonStyles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
+              placeholderTextColor={colors.textSecondary}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+
+            {!isLoginMode && (
+              <TextInput
+                style={commonStyles.input}
+                value={name}
+                onChangeText={setName}
+                placeholder="Full Name"
+                placeholderTextColor={colors.textSecondary}
+              />
+            )}
+            
+            <TextInput
+              style={commonStyles.input}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              placeholderTextColor={colors.textSecondary}
+              secureTextEntry
+            />
+            
+            <TouchableOpacity
+              style={[buttonStyles.primary, { marginBottom: 16 }]}
+              onPress={handleAuth}
+            >
+              <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
+                {isLoginMode ? 'Login' : 'Register'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setIsLoginMode(!isLoginMode)}
+            >
+              <Text style={{ color: colors.primary, fontSize: 14, textAlign: 'center' }}>
+                {isLoginMode ? "Don't have an account? Register" : "Already have an account? Login"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SimpleBottomSheet>
       </SafeAreaView>
     );
   }

@@ -19,10 +19,12 @@ export default function TransfersScreen() {
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [downloads, setDownloads] = useState<DownloadProgress[]>([]);
   const [activeTab, setActiveTab] = useState<'uploads' | 'downloads'>('uploads');
-  const { networkSpeed } = useNetworkSpeed();
+  const { networkSpeed, startMonitoring, stopMonitoring } = useNetworkSpeed();
 
   // Simulate some transfers
   useEffect(() => {
+    startMonitoring();
+    
     const sampleUploads: UploadProgress[] = [
       {
         id: '1',
@@ -73,6 +75,8 @@ export default function TransfersScreen() {
 
     setUploads(sampleUploads);
     setDownloads(sampleDownloads);
+
+    return () => stopMonitoring();
   }, []);
 
   const handleStartUpload = () => {
